@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Flying Blinking Title</title>
+<style>
+  :root {
+    --bg: brown;
+    --fg: beige;
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overflow: hidden; /* keep the title on screen with no scrollbars */
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  }
+
+  /* The flying title */
+  h1#fly {
+    position: fixed;            /* so it flies over the whole viewport */
+    top: 0; left: 0;
+    margin: 0;
+    padding: 0.15em 0.4em;
+    font-size: clamp(2rem, 6vw, 6rem);
+    color: var(--fg);
+    text-shadow: 0 0 10px #ffffff22, 0 0 30px #ffffff11;
+    user-select: none;
+    will-change: transform;
+    /* Blink forever with a sharp on/off */
+    animation: blink 0.6s steps(1, end) infinite;
+  }
+
+  @keyframes blink {
+    0%, 49.9%, 100% { opacity: 1; }
+    50%, 99.9% { opacity: 0; }
+  }
+</style>
+</head>
+<body>
+
+<h1 id="fly" aria-live="polite">Bonjour les GSI</h1>
+
+<script>
+(() => {
+  const el = document.getElementById('fly');
+
+  // Initial position and velocity (px, px/s)
+  let x = Math.random() * (window.innerWidth  - 200);
+  let y = Math.random() * (window.innerHeight - 100);
+  let vx = (Math.random() * 2 - 1) * 220; // random speed between -220..220 px/s
+  let vy = (Math.random() * 2 - 1) * 220;
+
+  const MAX_SPEED = 340;   // px/s cap
+  const JITTER    = 120;   // random accel magnitude
+  const PADDING   = 8;     // soft padding to avoid edge clipping
+
+  let last = performance.now();
+
+  function clampSpeed() {
+    const s = Math.hypot(vx, vy);
+    if (s > MAX_SPEED) {
+      const k = MAX_SPEED / s;
+      vx *= k; vy *= k;
+    }
+  }
+
+  function size() {
+    // Cache current element size
+    const rect = el.getBoundingClientRect();
+    return { w: rect.width, h: rect.height };
+  }
+
+  function tick(now) {
+    const dt = (now - last) / 1000; // seconds
+    last = now;
+
+    // Add small random acceleration for "random" wandering
+    vx += (Math.random() * 2 - 1) * JITTER * dt;
+    vy += (Math.random() * 2 - 1) * JITTER * dt;
+    clampSpeed();
+
+    // Integrate motion
+    x += vx * dt;
+    y += vy * dt;
+
+    // Bounds & bounce
+    const { w, h } = size();
+    const maxX = window.innerWidth  - w - PADDING;
+    const maxY = window.innerHeight - h - PADDING;
+    const minX = PADDING;
+    const minY = PADDING;
+
+    if (x < minX)  { x = minX;  vx = Math.abs(vx);  jitterKick(); }
+    if (x > maxX)  { x = maxX;  vx = -Math.abs(vx); jitterKick(); }
+    if (y < minY)  { y = minY;  vy = Math.abs(vy);  jitterKick(); }
+    if (y > maxY)  { y = maxY;  vy = -Math.abs(vy); jitterKick(); }
+
+    // Apply transform
+    el.style.transform = `translate(${x}px, ${y}px)`;
+
+    requestAnimationFrame(tick);
+  }
+
+  function jitterKick() {
+    // On bounce, add a small perpendicular nudge so paths feel less predictable
+    const k = 80;
+    vx += (Math.random() * 2 - 1) * k;
+    vy += (Math.random() * 2 - 1) * k;
+    clampSpeed();
+  }
+
+  // Handle resizes smoothly
+  window.addEventListener('resize', () => {
+    const { w, h } = size();
+    x = Math.min(Math.max(x, PADDING), window.innerWidth  - w - PADDING);
+    y = Math.min(Math.max(y, PADDING), window.innerHeight - h - PADDING);
+  });
+
+  // Start
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
