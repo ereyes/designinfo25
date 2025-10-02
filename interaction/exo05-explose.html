@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Explosion de texte au clic (canvas)</title>
+<style>
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: #0b0b10;
+    color: #f5f7fb;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    overflow: hidden;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hint {
+    position: fixed; inset: auto 0 10px 0; text-align: center;
+    font-size: 12px; letter-spacing: .04em; color:#9aa3b2; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hint">Cliquez n’importe où pour faire exploser la phrase</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  // --------- Config ----------
+  const PHRASE = 'Bonjour les GSI';
+  const FONT_PX = 72;
+  const FONT_FAMILY = `600 ${FONT_PX}px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+  const LETTER_SPACING = 2;
+  const GRAVITY = 1800;       // px/s²
+  const AIR_DRAG = 0.995;
+  const ROT_DRAG = 0.995;
+  const LIFE = 2.8;           // s
+  const BOUNCE = 0.12;
+  const FLOOR_MARGIN = 18;
+  // ---------------------------
+
+  // Déclarations AVANT tout appel
+  let state = 'idle';         // 'idle' | 'explode'
+  let glyphs = [];            // {ch, x, y, w}
+  let textBaselineY = 0;
+  let particles = [];         // {ch,x,y,vx,vy,a,rot,vrot,born,w}
+  let last = performance.now();
+  let DPR = Math.max(1, window.devicePixelRatio || 1);
+
+  function resize() {
+    DPR = Math.max(1, window.devicePixelRatio || 1);
+    canvas.width  = Math.floor(canvas.clientWidth  * DPR);
+    canvas.height = Math.floor(canvas.clientHeight * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (state === 'idle') layoutPhrase(); // OK car state/glyphs sont déjà déclarés
+  }
+
+  function totalTextWidth(s) {
+    ctx.save();
+    ctx.font = FONT_FAMILY;
+    let w = 0;
+    for (const ch of s) w += ctx.measureText(ch).width + LETTER_SPACING;
+    ctx.restore();
+    return Math.max(0, w - LETTER_SPACING);
+  }
+
+  function layoutPhrase() {
+    ctx.save();
+    ctx.font = FONT_FAMILY;
+    ctx.textBaseline = 'alphabetic';
+    const totalWidth = totalTextWidth(PHRASE);
+    const x0 = (canvas.clientWidth - totalWidth) / 2;
+    const y0 = (canvas.clientHeight) / 2;
+    glyphs = [];
+    let x = x0;
+    for (const ch of PHRASE) {
+      const w = ctx.measureText(ch).width;
+      glyphs.push({ ch, x, y: y0, w });
+      x += w + LETTER_SPACING;
+    }
+    textBaselineY = y0;
+    ctx.restore();
+    drawCenteredPhrase();
+  }
+
+  function drawCenteredPhrase() {
+    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    ctx.save();
+    ctx.font = FONT_FAMILY;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#f5f7fb';
+    ctx.shadowColor = '#ffffff22';
+    ctx.shadowBlur = 10;
+    for (const g of glyphs) ctx.fillText(g.ch, g.x, g.y);
+    ctx.restore();
+  }
+
+  function getAscentPx() {
+    return FONT_PX * 0.8; // heuristique simple
+  }
+
+  function explode(fromX, fromY) {
+    particles.length = 0;
+    const now = performance.now() / 1000;
+    const ascent = getAscentPx();
+    const midY = textBaselineY - ascent/2;
+
+    for (const g of glyphs) {
+      const cx = g.x + g.w / 2;
+      const cy = midY;
+      let dx = cx - fromX, dy = cy - fromY;
+      const len = Math.hypot(dx, dy) || 1;
+      dx /= len; dy /= len;
+
+      const speed = 400 + Math.random() * 700;
+      const jitter = (Math.random() - 0.5) * 0.6;
+      const angle = Math.atan2(dy, dx) + jitter;
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+
+      particles.push({
+        ch: g.ch,
+        x: g.x + g.w/2,
+        y: textBaselineY,
+        vx, vy: vy - 150 * Math.random(),
+        a: 1,
+        rot: (Math.random()-0.5) * 0.5,
+        vrot: (Math.random()-0.5) * 6,
+        born: now,
+        w: g.w
+      });
+    }
+    state = 'explode';
+  }
+
+  function stepExplosion(dt, now) {
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    ctx.clearRect(0, 0, W, H);
+    ctx.save();
+    ctx.font = FONT_FAMILY;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+
+    let alive = 0;
+
+    for (const p of particles) {
+      p.vx *= AIR_DRAG;
+      p.vy = p.vy * AIR_DRAG + GRAVITY * dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      p.vrot *= ROT_DRAG;
+      p.rot += p.vrot * dt;
+
+      const floorY = H - FLOOR_MARGIN;
+      if (p.y > floorY) {
+        p.y = floorY;
+        p.vy = -p.vy * BOUNCE;
+        p.vx *= 0.85;
+        p.vrot *= 0.6;
+      }
+      if (p.x < 0)  { p.x = 0;  p.vx = Math.abs(p.vx) * 0.6; }
+      if (p.x > W)  { p.x = W;  p.vx = -Math.abs(p.vx) * 0.6; }
+
+      const age = now - p.born;
+      p.a = Math.max(0, 1 - age / LIFE);
+
+      if (p.a > 0.02) {
+        alive++;
+        ctx.save();
+        ctx.globalAlpha = p.a;
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = '#f5f7fb';
+        ctx.shadowColor = '#ffffff22';
+        ctx.shadowBlur = 8;
+        ctx.fillText(p.ch, 0, 0);
+        ctx.restore();
+      }
+    }
+
+    ctx.restore();
+
+    if (alive === 0) {
+      state = 'idle';
+      layoutPhrase();
+    }
+  }
+
+  function frame(nowMs) {
+    const now = nowMs / 1000;
+    const dt = Math.min(0.033, (nowMs - last) / 1000);
+    last = nowMs;
+
+    if (state === 'idle') {
+      // rien : la phrase reste affichée (draw déjà fait)
+    } else {
+      stepExplosion(dt, now);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  window.addEventListener('resize', resize, { passive: true });
+  window.addEventListener('pointerdown', (ev) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const y = ev.clientY - rect.top;
+    if (state === 'idle') explode(x, y);
+  });
+
+  // Démarrage (après toutes les déclarations)
+  resize();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
